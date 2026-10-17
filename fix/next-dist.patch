@@ -1,0 +1,98 @@
+diff --git a/dist/esm/server/use-cache/use-cache-wrapper.js b/dist/esm/server/use-cache/use-cache-wrapper.js
+index 10fbe2e..afd6490 100644
+--- a/dist/esm/server/use-cache/use-cache-wrapper.js
++++ b/dist/esm/server/use-cache/use-cache-wrapper.js
+@@ -2016,6 +2016,14 @@ export async function cache(kind, id, boundArgsLength, originalFn, args) {
+                                 continue; // stream is not used → retry with new key
+                             }
+                         }
++                        // A fill that started before one of its tags was expired, by an
++                        // `updateTag()` or `revalidateTag()` in another request, holds data
++                        // the expiration replaced. Regenerate instead.
++                        if (await isJoinedInvocationOutdated(metadata, kind, workStore, workUnitStore, implicitTags, logPrefix)) {
++                            debug == null ? void 0 : debug(logPrefix, 'cross-request invocation outdated, regenerating', cacheHandlerKey);
++                            cacheSignal == null ? void 0 : cacheSignal.endRead();
++                            continue;
++                        }
+                         // Key matches — safe to fork.
+                         debug == null ? void 0 : debug(logPrefix, 'cross-request invocation matched, forking result', cacheHandlerKey);
+                         cacheSignal == null ? void 0 : cacheSignal.endRead();
+@@ -2566,6 +2574,29 @@ function shouldForceRevalidate(workStore, workUnitStore) {
+     }
+     return false;
+ }
++async function getImplicitTagsExpiration(workUnitStore, kind) {
++    var _workUnitStore_implicitTags;
++    const lazyExpiration = (_workUnitStore_implicitTags = workUnitStore.implicitTags) == null ? void 0 : _workUnitStore_implicitTags.expirationsByCacheKind.get(kind);
++    if (!lazyExpiration) {
++        return 0;
++    }
++    const expiration = isResolvedLazyResult(lazyExpiration) ? lazyExpiration.value : await lazyExpiration;
++    return expiration < Infinity ? expiration : 0;
++}
++async function isJoinedInvocationOutdated(metadata, kind, workStore, workUnitStore, implicitTags, logPrefix) {
++    if (shouldDiscardCacheEntry(metadata, workStore, workUnitStore, implicitTags, await getImplicitTagsExpiration(workUnitStore, kind), logPrefix)) {
++        return true;
++    }
++    const handler = getCacheHandler(kind);
++    if (!handler) {
++        return false;
++    }
++    const now = performance.timeOrigin + performance.now();
++    const expirations = await Promise.all(metadata.tags.map((tag)=>handler.getExpiration([
++            tag
++        ])));
++    return expirations.some((expiration)=>expiration > metadata.timestamp && expiration <= now);
++}
+ function shouldDiscardCacheEntry(entry, workStore, workUnitStore, implicitTags, implicitTagsExpiration, logPrefix) {
+     // If the cache entry was created before any of the implicit tags were
+     // revalidated last, we need to discard it.
+diff --git a/dist/server/use-cache/use-cache-wrapper.js b/dist/server/use-cache/use-cache-wrapper.js
+index 4421a67..e0540a1 100644
+--- a/dist/server/use-cache/use-cache-wrapper.js
++++ b/dist/server/use-cache/use-cache-wrapper.js
+@@ -2072,6 +2072,14 @@ async function cache(kind, id, boundArgsLength, originalFn, args) {
+                                 continue; // stream is not used → retry with new key
+                             }
+                         }
++                        // A fill that started before one of its tags was expired, by an
++                        // `updateTag()` or `revalidateTag()` in another request, holds data
++                        // the expiration replaced. Regenerate instead.
++                        if (await isJoinedInvocationOutdated(metadata, kind, workStore, workUnitStore, implicitTags, logPrefix)) {
++                            debug == null ? void 0 : debug(logPrefix, 'cross-request invocation outdated, regenerating', cacheHandlerKey);
++                            cacheSignal == null ? void 0 : cacheSignal.endRead();
++                            continue;
++                        }
+                         // Key matches — safe to fork.
+                         debug == null ? void 0 : debug(logPrefix, 'cross-request invocation matched, forking result', cacheHandlerKey);
+                         cacheSignal == null ? void 0 : cacheSignal.endRead();
+@@ -2622,6 +2630,29 @@ function shouldForceRevalidate(workStore, workUnitStore) {
+     }
+     return false;
+ }
++async function getImplicitTagsExpiration(workUnitStore, kind) {
++    var _workUnitStore_implicitTags;
++    const lazyExpiration = (_workUnitStore_implicitTags = workUnitStore.implicitTags) == null ? void 0 : _workUnitStore_implicitTags.expirationsByCacheKind.get(kind);
++    if (!lazyExpiration) {
++        return 0;
++    }
++    const expiration = (0, _lazyresult.isResolvedLazyResult)(lazyExpiration) ? lazyExpiration.value : await lazyExpiration;
++    return expiration < Infinity ? expiration : 0;
++}
++async function isJoinedInvocationOutdated(metadata, kind, workStore, workUnitStore, implicitTags, logPrefix) {
++    if (shouldDiscardCacheEntry(metadata, workStore, workUnitStore, implicitTags, await getImplicitTagsExpiration(workUnitStore, kind), logPrefix)) {
++        return true;
++    }
++    const handler = (0, _handlers.getCacheHandler)(kind);
++    if (!handler) {
++        return false;
++    }
++    const now = performance.timeOrigin + performance.now();
++    const expirations = await Promise.all(metadata.tags.map((tag)=>handler.getExpiration([
++            tag
++        ])));
++    return expirations.some((expiration)=>expiration > metadata.timestamp && expiration <= now);
++}
+ function shouldDiscardCacheEntry(entry, workStore, workUnitStore, implicitTags, implicitTagsExpiration, logPrefix) {
+     // If the cache entry was created before any of the implicit tags were
+     // revalidated last, we need to discard it.
